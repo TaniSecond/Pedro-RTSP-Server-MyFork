@@ -57,6 +57,14 @@ class RtspServer(
 
   /** 現在接続中のクライアント一覧のスナップショット。 */
   val connectedClients: List<ServerClient> get() = synchronized(clients) { clients.toList() }
+
+  /**
+   * TCP accept 直後に接続を拒否する IP ブロックリスト。
+   * ここに含まれる IP からの接続は RTSP ネゴシエーション前にソケットを閉じる。
+   * [disconnectClientsByIp] よりも確実で、1 バイトもデータを送らずに遮断できる。
+   */
+  @Volatile
+  var blockedIps: Set<String> = emptySet()
   // ─────────────────────────────────────────────────────────────────
 
   val droppedAudioFrames: Long
@@ -156,6 +164,12 @@ class RtspServer(
           Log.i(TAG, "Waiting client...")
           val clientSocket = server.accept()
           Log.i(TAG, "Client connected: ${clientSocket.host}:${clientSocket.port}")
+          // ── fork追加: IP ブロックリストチェック（accept 直後・RTSP前に遮断）──
+          if (clientSocket.host in blockedIps) {
+            Log.w(TAG, "Blocked IP ${clientSocket.host}: closing socket immediately")
+            try { clientSocket.socket.close() } catch (_: Exception) {}
+            continue
+          }
           // ── fork追加: 最大接続数チェック ─────────────────────────
           if (maxClients > 0 && synchronized(clients) { clients.size } >= maxClients) {
             Log.i(TAG, "Max clients ($maxClients) reached, rejecting ${clientSocket.host}")
