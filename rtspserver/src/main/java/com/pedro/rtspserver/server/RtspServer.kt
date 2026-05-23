@@ -51,6 +51,14 @@ class RtspServer(
   private var delay: Long? = null
   private var socketTimeout: Long = StreamSocket.DEFAULT_TIMEOUT
 
+  // ── fork追加 ──────────────────────────────────────────────────────
+  /** 同時接続を許可する最大クライアント数。0 = 無制限（デフォルト）。 */
+  var maxClients: Int = 0
+
+  /** 現在接続中のクライアント一覧のスナップショット。 */
+  val connectedClients: List<ServerClient> get() = synchronized(clients) { clients.toList() }
+  // ─────────────────────────────────────────────────────────────────
+
   val droppedAudioFrames: Long
     get() = synchronized(clients) {
       var items = 0L
@@ -147,8 +155,15 @@ class RtspServer(
         try {
           Log.i(TAG, "Waiting client...")
           val clientSocket = server.accept()
-          Log.i(TAG, "Client connected: ${clientSocket.host}")
-          val client = ServerClient(delay, socketType, clientSocket.host, clientSocket.socket, serverIp, port,
+          Log.i(TAG, "Client connected: ${clientSocket.host}:${clientSocket.port}")
+          // ── fork追加: 最大接続数チェック ─────────────────────────
+          if (maxClients > 0 && synchronized(clients) { clients.size } >= maxClients) {
+            Log.i(TAG, "Max clients ($maxClients) reached, rejecting ${clientSocket.host}")
+            try { clientSocket.socket.close() } catch (_: Exception) {}
+            continue
+          }
+          // ──────────────────────────────────────────────────────────
+          val client = ServerClient(delay, socketType, clientSocket.host, clientSocket.port, clientSocket.socket, serverIp, port,
             socketTimeout, serverCommandManager, this@RtspServer)
           client.setLogs(isEnableLogs)
           client.startClient()
@@ -168,6 +183,30 @@ class RtspServer(
   }
 
   fun getNumClients(): Int = clients.size
+
+  // ── fork追加: 個別クライアント切断 API ──────────────────────────
+  /**
+   * 指定したクライアントを強制切断し内部リストから除去する。
+   * [onClientDisconnected] を介してリスナにも通知する。
+   */
+  fun disconnectClient(client: ServerClient) {
+    synchronized(clients) {
+      client.stopClient()
+      clients.remove(client)
+    }
+    onMainThreadHandler { clientListener?.onClientDisconnected(client) }
+  }
+
+  /**
+   * 指定 IP のクライアントを全て切断する。
+   * @return 切断したクライアント数
+   */
+  fun disconnectClientsByIp(ip: String): Int {
+    val targets = synchronized(clients) { clients.filter { it.getAddress() == ip } }
+    targets.forEach { disconnectClient(it) }
+    return targets.size
+  }
+  // ─────────────────────────────────────────────────────────────────
 
   fun stopServer() {
     synchronized(clients) {

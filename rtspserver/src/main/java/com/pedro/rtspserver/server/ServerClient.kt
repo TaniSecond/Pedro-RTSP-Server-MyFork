@@ -2,6 +2,7 @@ package com.pedro.rtspserver.server
 
 import android.media.MediaCodec
 import android.util.Log
+import android.net.Uri
 import com.pedro.common.ConnectChecker
 import com.pedro.common.clone
 import com.pedro.common.frame.MediaFrame
@@ -23,6 +24,7 @@ class ServerClient(
   private val delay: Long? = null,
   private val socketType: SocketType,
   private val host: String,
+  private val clientPort: Int,
   private val socket: TcpStreamSocket,
   serverIp: String,
   serverPort: Int,
@@ -81,6 +83,28 @@ class ServerClient(
   val bytesSend: Long
     get() = rtspSender.getBytesSend()
 
+  // ── fork追加: クライアント情報の公開 API ─────────────────────────
+  /** 接続元クライアントのエフェメラルポート番号。 */
+  fun getPort(): Int = clientPort
+
+  /**
+   * RTSP OPTIONS/DESCRIBE リクエストの User-Agent ヘッダ値。
+   * ハンドシェイク完了前は null。
+   */
+  var userAgent: String? = null
+    private set
+
+  /**
+   * クライアントが最初のリクエストで要求した RTSP パス（例: "/live"）。
+   * ハンドシェイク完了前は null。
+   */
+  var requestPath: String? = null
+    private set
+
+  /** stopClient() の分かりやすいエイリアス。外部から kick するときに使う。 */
+  fun disconnect() = stopClient()
+  // ─────────────────────────────────────────────────────────────────
+
   init {
     serverCommandManager.setServerInfo(serverIp, serverPort)
   }
@@ -92,6 +116,21 @@ class ServerClient(
       while (isActive) {
         try {
           val request = commandManager.getRequest(socket)
+          // ── fork追加: User-Agent と requestPath を初回のみ抽出 ──────
+          if (userAgent == null) {
+            userAgent = request.text.lines()
+              .firstOrNull { it.startsWith("User-Agent:", ignoreCase = true) }
+              ?.substringAfter(":")?.trim()?.takeIf { it.isNotEmpty() }
+          }
+          if (requestPath == null) {
+            val urlPart = request.text.lines().firstOrNull()?.split(" ")?.getOrNull(1) ?: ""
+            if (urlPart.isNotEmpty()) {
+              try {
+                requestPath = Uri.parse(urlPart).path?.takeIf { it.isNotEmpty() }
+              } catch (_: Exception) {}
+            }
+          }
+          // ────────────────────────────────────────────────────────────
           val cSeq = request.cSeq //update cSeq
           if (cSeq == -1) { //If cSeq parsed fail send error to client
             socket.write(commandManager.createError(500, cSeq))
