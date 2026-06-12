@@ -1,7 +1,8 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 allprojects {
     group = "com.github.pedroSG94"
-    version = "1.4.1"
+    // 1.4.2-sub: RtspServerCamera2 にサブストリーム（低解像度第2配信）対応を追加。
+    version = "1.4.2-sub"
 
     plugins.withType<PublishingPlugin> {
         configure<PublishingExtension> {

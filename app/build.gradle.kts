@@ -11,7 +11,8 @@ android {
         applicationId = "com.pedro.sample"
         minSdk = 23
         targetSdk = 36
-        versionCode = project.version.toString().replace(".", "").toInt()
+        // バージョンに "-sub" 等のサフィックスが付いても動くよう数字のみ抽出する。
+        versionCode = project.version.toString().filter { it.isDigit() }.toInt()
         versionName = project.version.toString()
     }
     buildTypes {
